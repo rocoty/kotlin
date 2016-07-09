@@ -99,13 +99,12 @@ class ModuleDescriptorImpl @JvmOverloads constructor(
     val packageFragmentProvider: PackageFragmentProvider
         get() = packageFragmentProviderForWholeModuleWithDependencies
 
-    private val friendModules = LinkedHashSet<ModuleDescriptor>()
+    private var friendModules: () -> Set<ModuleDescriptor> = { emptySet() }
 
-    override fun isFriend(other: ModuleDescriptor) = other == this || other in friendModules
+    override fun isFriend(other: ModuleDescriptor) = other == this || other in friendModules()
 
-    fun addFriend(friend: ModuleDescriptorImpl): Unit {
-        assert(friend != this) { "Attempt to make module $id a friend to itself" }
-        friendModules.add(friend)
+    fun setFriends(friendsModulesComputation: () -> Set<ModuleDescriptor>): Unit {
+        this.friendModules = friendsModulesComputation
     }
 
     @Suppress("UNCHECKED_CAST")

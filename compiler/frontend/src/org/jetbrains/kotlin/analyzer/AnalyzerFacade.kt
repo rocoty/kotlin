@@ -34,6 +34,7 @@ import org.jetbrains.kotlin.psi.KtFile
 import org.jetbrains.kotlin.resolve.TargetEnvironment
 import org.jetbrains.kotlin.resolve.TargetPlatform
 import org.jetbrains.kotlin.resolve.createModule
+import org.jetbrains.kotlin.utils.keysToMap
 import org.jetbrains.kotlin.utils.singletonOrEmptyList
 import java.util.*
 
@@ -64,19 +65,24 @@ class EmptyResolverForProject<M : ModuleInfo> : ResolverForProject<M>() {
     override val allModules: Collection<M> = listOf()
 }
 
+val ResolverForModuleCapability = ModuleDescriptor.Capability<() -> ResolverForModule>("ResolverForModuleCapability")
+
 class ResolverForProjectImpl<M : ModuleInfo>(
         private val debugName: String,
-        val descriptorByModule: Map<M, ModuleDescriptorImpl>,
-        val delegateResolver: ResolverForProject<M> = EmptyResolverForProject()
+        private val delegateResolver: ResolverForProject<M> = EmptyResolverForProject()
 ) : ResolverForProject<M>() {
+    private lateinit var descriptorByModule: Map<M, () -> ModuleDescriptorImpl>
+
+    fun initialize(descriptorByModule: Map<M, () -> ModuleDescriptorImpl>) {
+        this.descriptorByModule = descriptorByModule
+    }
+
     override fun tryGetResolverForModule(moduleInfo: M): ResolverForModule? {
         if (!isCorrectModuleInfo(moduleInfo)) {
             return null
         }
         return resolverForModuleDescriptor(doGetDescriptorForModule(moduleInfo))
     }
-
-    internal val resolverByModuleDescriptor: MutableMap<ModuleDescriptor, () -> ResolverForModule> = HashMap()
 
     override val allModules: Collection<M> by lazy {
         (descriptorByModule.keys + delegateResolver.allModules).toSet()
@@ -88,8 +94,7 @@ class ResolverForProjectImpl<M : ModuleInfo>(
     private fun isCorrectModuleInfo(moduleInfo: M) = moduleInfo in allModules
 
     override fun resolverForModuleDescriptor(descriptor: ModuleDescriptor): ResolverForModule {
-        val computation = resolverByModuleDescriptor[descriptor] ?: return delegateResolver.resolverForModuleDescriptor(descriptor)
-        return computation()
+        return descriptor.getCapability(ResolverForModuleCapability)?.invoke() ?: delegateResolver.resolverForModuleDescriptor(descriptor)
     }
 
     override fun descriptorForModule(moduleInfo: M): ModuleDescriptorImpl {
@@ -100,7 +105,7 @@ class ResolverForProjectImpl<M : ModuleInfo>(
     }
 
     private fun doGetDescriptorForModule(moduleInfo: M): ModuleDescriptorImpl {
-        return descriptorByModule[moduleInfo] ?: delegateResolver.descriptorForModule(moduleInfo) as ModuleDescriptorImpl
+        return descriptorByModule[moduleInfo]?.invoke() ?: delegateResolver.descriptorForModule(moduleInfo) as ModuleDescriptorImpl
     }
 }
 
@@ -154,73 +159,55 @@ abstract class AnalyzerFacade<in P : PlatformAnalysisParameters> {
             firstDependency: M? = null
     ): ResolverForProject<M> {
         val storageManager = projectContext.storageManager
-        fun createResolverForProject(): ResolverForProjectImpl<M> {
-            val descriptorByModule = HashMap<M, ModuleDescriptorImpl>()
-            modules.forEach {
-                module ->
-                descriptorByModule[module] =
-                        targetPlatform.createModule(module.name, storageManager, builtIns, module.capabilities)
-            }
-            return ResolverForProjectImpl(debugName, descriptorByModule, delegateResolver)
-        }
-
-        val resolverForProject = createResolverForProject()
+        val resolverForProject = ResolverForProjectImpl(debugName, delegateResolver)
 
         fun computeDependencyDescriptors(module: M): List<ModuleDescriptorImpl> {
             val orderedDependencies = firstDependency.singletonOrEmptyList() + module.dependencies()
             val dependenciesDescriptors = orderedDependencies.mapTo(ArrayList<ModuleDescriptorImpl>()) {
-                        dependencyInfo ->
-                        resolverForProject.descriptorForModule(dependencyInfo as M)
-                    }
+                dependencyInfo ->
+                resolverForProject.descriptorForModule(dependencyInfo as M)
+            }
             module.dependencyOnBuiltIns().adjustDependencies(
                     resolverForProject.descriptorForModule(module).builtIns.builtInsModule, dependenciesDescriptors)
             return dependenciesDescriptors
         }
 
-        fun setupModuleDependencies() {
-            modules.forEach {
-                module ->
-                resolverForProject.descriptorForModule(module).setDependencies(
-                        LazyModuleDependencies(storageManager) { computeDependencyDescriptors(module) }
-                )
-            }
-        }
+        val cache = WeakReferenceSLRUCache<M, ModuleDescriptorImpl>(storageManager)
+        val moduleInfoToDescriptorComputationMap: Map<M, () -> ModuleDescriptorImpl> = modules.keysToMap {
+            module ->
+            cache.prepareValueComputation(module) {
+                val capabilities = HashMap(module.capabilities)
+                val descriptor = targetPlatform.createModule(module.name, storageManager, builtIns, capabilities)
+                val content = modulesContent(module)
 
-        setupModuleDependencies()
-
-        fun addFriends() {
-            modules.forEach {
-                module ->
-                val descriptor = resolverForProject.descriptorForModule(module)
-                module.modulesWhoseInternalsAreVisible().forEach {
-                    descriptor.addFriend(resolverForProject.descriptorForModule(it as M))
-                }
-            }
-        }
-
-        addFriends()
-
-        val cache = WeakReferenceSLRUCache<M, ResolverForModule>(storageManager)
-
-        fun initializeResolverForProject() {
-            modules.forEach {
-                module ->
-                val descriptor = resolverForProject.descriptorForModule(module)
-                val computeResolverForModule = cache.prepareValueComputation(module) {
-                    val content = modulesContent(module)
+                val computeResolverForModule = storageManager.createLazyValue {
                     createResolverForModule(
-                            module, descriptor, projectContext.withModule(descriptor), modulesContent(module),
-                            platformParameters, targetEnvironment, resolverForProject,
-                            packagePartProviderFactory(module, content)
+                        module, descriptor, projectContext.withModule(descriptor), modulesContent(module),
+                        platformParameters, targetEnvironment, resolverForProject,
+                        packagePartProviderFactory(module, content)
                     )
                 }
 
-                descriptor.initialize(DelegatingPackageFragmentProvider { computeResolverForModule().packageFragmentProvider })
-                resolverForProject.resolverByModuleDescriptor[descriptor] = computeResolverForModule
+                descriptor.initialize(DelegatingPackageFragmentProvider { computeResolverForModule().packageFragmentProvider } )
+
+                descriptor.setDependencies(
+                        LazyModuleDependencies(storageManager) { computeDependencyDescriptors(module) }
+                )
+
+                descriptor.setFriends(storageManager.createLazyValue {
+                    module.modulesWhoseInternalsAreVisible().mapTo(mutableSetOf()) {
+                        resolverForProject.descriptorForModule(it as M)
+                    }
+                })
+
+                capabilities[ResolverForModuleCapability] = computeResolverForModule
+
+                descriptor
             }
         }
 
-        initializeResolverForProject()
+        resolverForProject.initialize(moduleInfoToDescriptorComputationMap)
+
         return resolverForProject
     }
 
