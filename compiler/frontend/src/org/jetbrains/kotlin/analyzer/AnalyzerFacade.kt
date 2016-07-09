@@ -193,7 +193,7 @@ abstract class AnalyzerFacade<in P : PlatformAnalysisParameters> {
                 module ->
                 val descriptor = resolverForProject.descriptorForModule(module)
                 module.modulesWhoseInternalsAreVisible().forEach {
-                    resolverForProject.descriptorForModule(it as M).addFriend(descriptor)
+                    descriptor.addFriend(resolverForProject.descriptorForModule(it as M))
                 }
             }
         }
