@@ -45,7 +45,9 @@ class KtPostfixTemplateProvider : PostfixTemplateProvider {
             KtWhenExpressionPostfixTemplate,
             KtTryPostfixTemplate,
             KtIntroduceVariablePostfixTemplate("val"),
-            KtIntroduceVariablePostfixTemplate("var")
+            KtIntroduceVariablePostfixTemplate("var"),
+            KtForEachPostfixTemplate("for"),
+            KtForEachPostfixTemplate("iter")
     )
 
     override fun isTerminalSymbol(currentChar: Char) = currentChar == '.' || currentChar == '!'
