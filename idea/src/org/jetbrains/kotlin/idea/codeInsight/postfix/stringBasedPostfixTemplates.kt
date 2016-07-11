@@ -19,6 +19,7 @@ package org.jetbrains.kotlin.idea.codeInsight.postfix
 import com.intellij.codeInsight.template.Template
 import com.intellij.codeInsight.template.impl.ConstantNode
 import com.intellij.codeInsight.template.impl.MacroCallNode
+import com.intellij.codeInsight.template.postfix.templates.PostfixTemplateExpressionSelector
 import com.intellij.codeInsight.template.postfix.templates.StringBasedPostfixTemplate
 import com.intellij.psi.PsiElement
 import org.jetbrains.kotlin.idea.liveTemplates.macro.SuggestVariableNameMacro
@@ -27,20 +28,66 @@ import org.jetbrains.kotlin.types.KotlinType
 import org.jetbrains.kotlin.types.typeUtil.isIterator
 import org.jetbrains.kotlin.util.OperatorNameConventions
 
+internal abstract class ConstantStringBasedPostfixTemplate(
+        name: String,
+        desc: String,
+        private val template: String,
+        selector: PostfixTemplateExpressionSelector
+) :  StringBasedPostfixTemplate(name, desc, selector) {
+    override fun getTemplateString(element: PsiElement) = template
+
+    override fun getElementToRemove(expr: PsiElement?) = expr
+}
+
 internal class KtForEachPostfixTemplate(
         name: String
-) : StringBasedPostfixTemplate(name, "for (item in expr)", createFilteredByTypeSelector(KotlinType::containsIteratorMethod)) {
-    override fun getTemplateString(element: PsiElement) = "for (\$name$ in \$expr$) {\n    \$END$\n}"
-
+) : ConstantStringBasedPostfixTemplate(
+        name,
+        "for (item in expr)",
+        "for (\$name$ in \$expr$) {\n    \$END$\n}",
+        createFilteredByTypeSelector(KotlinType::containsIteratorMethod)
+) {
     override fun setVariables(template: Template, element: PsiElement) {
         val name = MacroCallNode(SuggestVariableNameMacro())
         template.addVariable("name", name, ConstantNode("item"), true)
     }
-
-    override fun getElementToRemove(expr: PsiElement?) = expr
 }
 
 private fun KotlinType.containsIteratorMethod() =
     memberScope.getContributedFunctions(OperatorNameConventions.ITERATOR, NoLookupLocation.FROM_IDE).any {
         it.returnType?.isIterator() ?: false && it.valueParameters.isEmpty()
     }
+
+internal object KtAssertPostfixTemplate : ConstantStringBasedPostfixTemplate(
+        "assert",
+        "assert(expr) { \"\" }",
+        "assert(\$expr$) { \"\$END$\" }",
+        BOOLEAN_EXPRESSION_POSTFIX_TEMPLATE_SELECTOR
+)
+
+internal object KtParenthesizedPostfixTemplate : ConstantStringBasedPostfixTemplate(
+        "par", "(expr)",
+        "(\$expr$)\$END$",
+        ANY_EXPRESSION
+)
+
+internal object KtSoutPostfixTemplate : ConstantStringBasedPostfixTemplate(
+        "sout",
+        "println(expr)",
+        "println(\$expr$)\$END$",
+        ANY_EXPRESSION
+)
+
+internal object KtReturnPostfixTemplate : ConstantStringBasedPostfixTemplate(
+        "return",
+        "return expr",
+        "return \$expr$\$END$",
+        ANY_EXPRESSION
+)
+
+internal object KtWhilePostfixTemplate : ConstantStringBasedPostfixTemplate(
+        "while",
+        "while (expr) {}",
+        "while (\$expr$) {\n\$END$\n}",
+        BOOLEAN_EXPRESSION_POSTFIX_TEMPLATE_SELECTOR
+)
