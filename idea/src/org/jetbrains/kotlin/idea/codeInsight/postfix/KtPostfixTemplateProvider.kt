@@ -25,6 +25,7 @@ import com.intellij.psi.PsiFile
 import org.jetbrains.kotlin.idea.caches.resolve.analyze
 import org.jetbrains.kotlin.idea.intentions.getExpressionsByCursorContext
 import org.jetbrains.kotlin.idea.intentions.negate
+import org.jetbrains.kotlin.idea.refactoring.introduce.introduceVariable.KotlinIntroduceVariableHandler
 import org.jetbrains.kotlin.psi.KtExpression
 import org.jetbrains.kotlin.psi.KtPsiFactory
 import org.jetbrains.kotlin.resolve.calls.callUtil.getType
@@ -42,7 +43,9 @@ class KtPostfixTemplateProvider : PostfixTemplateProvider {
             KtNotNullPostfixTemplate("nn"),
             KtIsNullPostfixTemplate,
             KtWhenExpressionPostfixTemplate,
-            KtTryPostfixTemplate
+            KtTryPostfixTemplate,
+            KtIntroduceVariablePostfixTemplate("val"),
+            KtIntroduceVariablePostfixTemplate("var")
     )
 
     override fun isTerminalSymbol(currentChar: Char) = currentChar == '.' || currentChar == '!'
@@ -60,6 +63,19 @@ private object KtNotPostfixTemplate : NotPostfixTemplate(
         KtPostfixTemplatePsiInfo,
         BOOLEAN_EXPRESSION_POSTFIX_TEMPLATE_SELECTOR
 )
+
+private class KtIntroduceVariablePostfixTemplate(
+        val kind: String
+) : PostfixTemplateWithExpressionSelector(kind, "$kind name = expression", ANY_EXPRESSION) {
+    override fun expandForChooseExpression(expression: PsiElement, editor: Editor) {
+        KotlinIntroduceVariableHandler.doRefactoring(
+                expression.project, editor, expression as KtExpression,
+                isVar = kind == "var",
+                occurrencesToReplace = null,
+                onNonInteractiveFinish = null
+        )
+    }
+}
 
 internal object KtPostfixTemplatePsiInfo : PostfixTemplatePsiInfo() {
     override fun createExpression(context: PsiElement, prefix: String, suffix: String) =
