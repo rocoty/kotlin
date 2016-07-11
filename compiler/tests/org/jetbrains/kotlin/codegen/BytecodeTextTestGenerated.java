@@ -1135,6 +1135,12 @@ public class BytecodeTextTestGenerated extends AbstractBytecodeTextTest {
             KotlinTestUtils.assertAllTestsPresentByMetadata(this.getClass(), new File("compiler/testData/codegen/bytecodeText/lineNumbers"), Pattern.compile("^(.+)\\.kt$"), true);
         }
 
+        @TestMetadata("beforeGotoWhileStartInstruction.kt")
+        public void testBeforeGotoWhileStartInstruction() throws Exception {
+            String fileName = KotlinTestUtils.navigationMetadata("compiler/testData/codegen/bytecodeText/lineNumbers/beforeGotoWhileStartInstruction.kt");
+            doTest(fileName);
+        }
+
         @TestMetadata("ifElse.kt")
         public void testIfElse() throws Exception {
             String fileName = KotlinTestUtils.navigationMetadata("compiler/testData/codegen/bytecodeText/lineNumbers/ifElse.kt");
