@@ -16,7 +16,10 @@
 
 package org.jetbrains.kotlin.idea.intentions
 
+import com.intellij.psi.PsiElement
+import com.intellij.psi.PsiWhiteSpace
 import com.intellij.psi.tree.IElementType
+import com.intellij.psi.util.PsiTreeUtil
 import org.jetbrains.kotlin.KtNodeTypes
 import org.jetbrains.kotlin.builtins.KotlinBuiltIns
 import org.jetbrains.kotlin.descriptors.CallableDescriptor
@@ -28,6 +31,7 @@ import org.jetbrains.kotlin.idea.references.mainReference
 import org.jetbrains.kotlin.idea.util.IdeDescriptorRenderers
 import org.jetbrains.kotlin.lexer.KtTokens
 import org.jetbrains.kotlin.psi.*
+import org.jetbrains.kotlin.psi.psiUtil.parentsWithSelf
 import org.jetbrains.kotlin.psi.typeRefHelpers.setReceiverTypeReference
 import org.jetbrains.kotlin.resolve.BindingContext
 import org.jetbrains.kotlin.resolve.calls.callUtil.getResolvedCall
@@ -203,3 +207,17 @@ private fun getNegatedOperatorText(token: IElementType): String {
         else -> throw IllegalArgumentException("The token $token does not have a negated equivalent.")
     }
 }
+
+fun getExpressionsByCursorContext(context: PsiElement): Sequence<KtExpression> {
+    val startElement = skipWhitespaces(context)
+    return startElement.parentsWithSelf
+            .filterIsInstance<KtExpression>()
+            .takeWhile { it !is KtBlockExpression && it !is KtDeclarationWithBody && !it.isEffectivelyDeclaration() }
+}
+
+private fun KtElement.isEffectivelyDeclaration() =
+        this is KtNamedDeclaration && this !is KtFunctionLiteral &&
+            // !(fun (a) = 1)
+            (this !is KtNamedFunction || this.name == null)
+
+private fun skipWhitespaces(context: PsiElement) = PsiTreeUtil.skipSiblingsBackward(context, PsiWhiteSpace::class.java) ?: context
